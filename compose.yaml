@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DB_PATH: /data/garage.db
+    volumes:
+      - garage-data:/data
+
+volumes:
+  garage-data:

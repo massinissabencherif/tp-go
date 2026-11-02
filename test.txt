@@ -1,0 +1,117 @@
+TESTER L'API GARAGE
+===================
+
+OÙ : dans un terminal, depuis le dossier du projet (/Users/massinissabencherif/Desktop/tp-go).
+     L'API doit tourner sur http://localhost:8080 :
+         make docker       (Docker, base dans un volume)     ou     make run     (en local)
+     Test rapide : curl localhost:8080/vehicules   ->   []
+
+COMMENT : copier-coller les commandes dans l'ordre (le scénario dépend des étapes précédentes).
+     Ajouter -i à curl pour voir le code HTTP :  curl -i ...
+     Base propre avant de commencer :  docker compose down -v && docker compose up -d
+
+TESTS AUTOMATIQUES (sans lancer le serveur) :
+     make test            tous les tests
+     go test -race ./...  avec détection de problèmes de concurrence
+     make check           fmt + vet + tests
+
+-----------------------------------------------------------------------------------
+SCÉNARIO MANUEL
+-----------------------------------------------------------------------------------
+
+1. Liste vide
+curl -s localhost:8080/vehicules
+   attendu : 200  []
+
+2. Créer un véhicule (la plaque en minuscules est acceptée et passée en majuscules)
+curl -s -X POST localhost:8080/vehicules -d '{"plaque":"ab-123-cd","marque":"Renault","modele":"Clio","annee":2020,"kilometrage":42000,"proprietaire":{"nom":"Alice","telephone":"0612345678"}}'
+   attendu : 201  le véhicule avec "plaque":"AB-123-CD"
+
+3. Créer le même véhicule (doublon)
+curl -s -X POST localhost:8080/vehicules -d '{"plaque":"AB-123-CD","marque":"Renault","modele":"Clio","annee":2020,"kilometrage":42000,"proprietaire":{"nom":"Alice","telephone":"0612345678"}}'
+   attendu : 409  {"error":"véhicule AB-123-CD : existe déjà"}
+
+4. Créer un second véhicule
+curl -s -X POST localhost:8080/vehicules -d '{"plaque":"EF-456-GH","marque":"Peugeot","modele":"208","annee":2022,"kilometrage":8000,"proprietaire":{"nom":"Bob","telephone":"+33 6 98 76 54 32"}}'
+   attendu : 201
+
+5. Détails d'un véhicule
+curl -s localhost:8080/vehicules/AB-123-CD
+   attendu : 200
+
+6. Véhicule inexistant
+curl -s localhost:8080/vehicules/ZZ-999-ZZ
+   attendu : 404  {"error":"véhicule ZZ-999-ZZ : introuvable"}
+
+7. Plaque au mauvais format
+curl -s localhost:8080/vehicules/abc
+   attendu : 422  {"error":"plaque : format attendu AA-123-AA"}
+
+8. Données invalides (marque manquante)
+curl -s -X POST localhost:8080/vehicules -d '{"plaque":"AA-111-AA"}'
+   attendu : 422  {"error":"marque : obligatoire"}
+
+9. JSON cassé
+curl -s -X POST localhost:8080/vehicules -d '{'
+   attendu : 400  {"error":"JSON invalide : ..."}
+
+10. Ajouter une intervention (statut par défaut : en_cours)
+curl -s -X POST localhost:8080/vehicules/AB-123-CD/interventions -d '{"date":"2025-03-01","description":"Vidange"}'
+   attendu : 201  {"id":1,...,"statut":"en_cours"}
+
+11. Ajouter une intervention terminée
+curl -s -X POST localhost:8080/vehicules/AB-123-CD/interventions -d '{"date":"2025-03-02","description":"Freins","statut":"terminee"}'
+   attendu : 201
+
+12. Intervention avec statut invalide
+curl -s -X POST localhost:8080/vehicules/AB-123-CD/interventions -d '{"date":"2025-03-01","description":"x","statut":"fini"}'
+   attendu : 422  {"error":"statut : valeurs possibles : en_cours, terminee, annulee"}
+
+13. Intervention avec date invalide
+curl -s -X POST localhost:8080/vehicules/AB-123-CD/interventions -d '{"date":"01/03/2025","description":"x"}'
+   attendu : 422  {"error":"date : format attendu YYYY-MM-DD"}
+
+14. Intervention sur un véhicule inexistant
+curl -s -X POST localhost:8080/vehicules/ZZ-999-ZZ/interventions -d '{"date":"2025-03-01","description":"x"}'
+   attendu : 404
+
+15. Lister les interventions d'un véhicule
+curl -s localhost:8080/vehicules/AB-123-CD/interventions
+   attendu : 200  2 interventions
+
+16. Statistiques
+curl -s localhost:8080/stats
+   attendu : 200  {"nombre_vehicules":2,"interventions_par_statut":{"annulee":0,"en_cours":1,"terminee":1}}
+
+17. Supprimer un véhicule qui a des interventions (doit être refusé)
+curl -s -i -X DELETE localhost:8080/vehicules/AB-123-CD
+   attendu : 409  "véhicule AB-123-CD (2 interventions) : suppression impossible : le véhicule a des interventions"
+
+18. Supprimer un véhicule sans intervention
+curl -s -i -X DELETE localhost:8080/vehicules/EF-456-GH
+   attendu : 204  (pas de corps)
+
+19. Vérifier que le véhicule a disparu
+curl -s localhost:8080/vehicules/EF-456-GH
+   attendu : 404
+
+20. Méthode non prévue
+curl -s -i -X PUT localhost:8080/vehicules/AB-123-CD
+   attendu : 405
+
+21. Corps trop gros (limite 1 Mo)
+(printf '{"marque":"'; head -c 2000000 /dev/zero | tr '\0' 'a'; printf '"}') | curl -s -X POST localhost:8080/vehicules --data-binary @-
+   attendu : 413  {"error":"corps de requête trop volumineux"}
+
+22. Persistance : redémarrer le conteneur, les données doivent rester
+docker compose restart api
+curl -s localhost:8080/vehicules
+   attendu : 200  le véhicule AB-123-CD est toujours là
+
+-----------------------------------------------------------------------------------
+À VÉRIFIER AUSSI
+-----------------------------------------------------------------------------------
+- Chaque réponse JSON a l'en-tête Content-Type: application/json  (curl -i)
+- Les logs du serveur :  docker compose logs -f api   (une ligne par requête)
+- Arrêter / nettoyer :  docker compose down       (garde les données)
+                        docker compose down -v    (supprime aussi la base)

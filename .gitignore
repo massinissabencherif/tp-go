@@ -1,0 +1,20 @@
+# Binaires
+/bin/
+*.exe
+*.test
+*.out
+
+# Go
+vendor/
+go.work
+coverage.txt
+
+# Éditeur / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Base SQLite
+*.db
+*.db-wal
+*.db-shm
